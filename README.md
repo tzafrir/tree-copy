@@ -35,11 +35,22 @@ pip install .
 tree-copy [directory]   # defaults to current directory
 ```
 
-As a tmux split pane, add to `~/.tmux.conf`:
+As a togglable tmux sidebar, add to `~/.tmux.conf`:
 
 ```bash
-bind-key e split-window -hb -l 35 "tree-copy #{pane_current_path}"
+bind-key e run-shell " \
+  PANE=$(tmux show-option -wqv @tree-copy-pane); \
+  if [ -n \"$PANE\" ] && tmux list-panes -F '#{pane_id}' | grep -q \"^$PANE\$\"; then \
+    tmux kill-pane -t \"$PANE\"; \
+    tmux set-option -w @tree-copy-pane ''; \
+  else \
+    NEW_PANE=$(tmux split-window -hbP -l 35 -F '#{pane_id}' \"tree-copy '#{pane_current_path}'\"); \
+    tmux set-option -w @tree-copy-pane \"$NEW_PANE\"; \
+  fi"
 ```
+
+`prefix + e` opens the sidebar; pressing it again closes it. State (expanded folders, cursor position) is saved automatically and restored on next open.
+
 
 ## Keybindings
 

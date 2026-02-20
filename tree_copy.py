@@ -15,15 +15,21 @@ Keys:
     q / Escape      Quit
 """
 
+import json
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
+from typing import Iterable
 
 from textual.app import App, ComposeResult, SystemCommand
-from textual.screen import Screen
-from typing import Iterable
 from textual.binding import Binding
+from textual.screen import Screen
 from textual.widgets import DirectoryTree, Footer
+
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
 
 class FileTree(DirectoryTree):
@@ -36,6 +42,7 @@ class FileTree(DirectoryTree):
         Binding("e",          "edit_nano",      "Edit (nano)", show=True),
         Binding("c",          "copy_rel_path",  "Copy rel",   show=True),
         Binding("C",          "copy_abs_path",  "Copy abs",   show=True),
+        Binding("z",          "zoom_pane",      "Zoom",       show=True),
         Binding("q",          "quit_app",       "Quit",       show=True),
         Binding("escape",     "quit_app",       "Quit",       show=False),
     ]
@@ -101,15 +108,28 @@ class FileTree(DirectoryTree):
     # Actions
     # ------------------------------------------------------------------
 
+    def _is_web(self) -> bool:
+        try:
+            from textual.drivers.web_driver import WebDriver
+            return isinstance(self.app._driver, WebDriver)
+        except Exception:
+            return False
+
     def action_open_glow(self) -> None:
         path = self._node_path(self.cursor_node)
         if path and path.is_file():
+            if self._is_web():
+                self.app.notify("Not available in browser mode", severity="warning")
+                return
             with self.app.suspend():
                 subprocess.run(["glow", "-p", str(path)])
 
     def action_edit_nano(self) -> None:
         path = self._node_path(self.cursor_node)
         if path and path.is_file():
+            if self._is_web():
+                self.app.notify("Not available in browser mode", severity="warning")
+                return
             with self.app.suspend():
                 subprocess.run(["nano", str(path)])
 
@@ -138,6 +158,10 @@ class FileTree(DirectoryTree):
         if node is not None and node.parent is None and node.is_expanded:
             return
         super().action_select_cursor()
+
+    def action_zoom_pane(self) -> None:
+        if os.environ.get("TMUX"):
+            subprocess.run(["tmux", "resize-pane", "-Z"], capture_output=True)
 
     def action_quit_app(self) -> None:
         self.app.exit()
@@ -218,9 +242,185 @@ class SidebarApp(App):
     }
     """
 
+    # Dirs to ignore when watching (noise with no useful signal)
+    _WATCH_IGNORE = {"__pycache__", ".git", ".mypy_cache", ".ruff_cache", "node_modules"}
+
+    _STATE_FILE = Path.home() / ".local" / "share" / "tree-copy" / "state.json"
+
     def __init__(self, root: Path) -> None:
         super().__init__()
         self.root = root
+        self._pending_paths: set[Path] = set()
+        self._refresh_timer = None
+        self._observer: Observer | None = None
+        self._restore_expanded: set[str] = set()
+        self._saved_cursor: str | None = None
+        self._load_state()
+
+    # ------------------------------------------------------------------
+    # State persistence
+    # ------------------------------------------------------------------
+
+    def _load_state(self) -> None:
+        try:
+            data = json.loads(self._STATE_FILE.read_text())
+            saved = data.get(str(self.root), {})
+            self._restore_expanded = set(saved.get("expanded", []))
+            self._saved_cursor = saved.get("cursor")
+        except Exception:
+            pass
+
+    def _save_state(self) -> None:
+        try:
+            tree = self.query_one(FileTree)
+            expanded: list[str] = []
+
+            def walk(node):
+                if node.is_expanded:
+                    p = tree._node_path(node)
+                    if p:
+                        expanded.append(str(p))
+                for child in node.children:
+                    walk(child)
+
+            walk(tree.root)
+            cursor_path = tree._node_path(tree.cursor_node)
+
+            data: dict = {}
+            try:
+                data = json.loads(self._STATE_FILE.read_text())
+            except Exception:
+                pass
+
+            data[str(self.root)] = {
+                "expanded": expanded,
+                "cursor": str(cursor_path) if cursor_path else None,
+            }
+            self._STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            self._STATE_FILE.write_text(json.dumps(data, indent=2))
+        except Exception:
+            pass
+
+    def on_tree_node_expanded(self, event) -> None:
+        """Cascade expansion to restore saved state."""
+        if not self._restore_expanded:
+            return
+        # Give DirectoryTree a moment to populate the node's children
+        self.set_timer(0.1, lambda: self._expand_children(event.node))
+
+    def _expand_children(self, node) -> None:
+        tree = self.query_one(FileTree)
+        for child in node.children:
+            p = tree._node_path(child)
+            if p and str(p) in self._restore_expanded:
+                child.expand()
+
+    def _restore_state(self) -> None:
+        """Kick off cascade expansion from root's already-loaded children."""
+        tree = self.query_one(FileTree)
+        for child in tree.root.children:
+            p = tree._node_path(child)
+            if p and str(p) in self._restore_expanded:
+                child.expand()
+        if self._saved_cursor:
+            self.set_timer(1.2, self._restore_cursor)
+
+    def _restore_cursor(self) -> None:
+        tree = self.query_one(FileTree)
+        target = Path(self._saved_cursor)
+
+        def walk(node):
+            if tree._node_path(node) == target:
+                tree.move_cursor(node)
+                return True
+            for child in node.children:
+                if walk(child):
+                    return True
+            return False
+
+        walk(tree.root)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def on_mount(self) -> None:
+        app = self
+
+        class Handler(FileSystemEventHandler):
+            def on_any_event(self, event):
+                src = Path(event.src_path)
+                if any(part in app._WATCH_IGNORE for part in src.parts):
+                    return
+                changed = src if src.is_dir() else src.parent
+                app.call_from_thread(app._queue_refresh, changed)
+                if hasattr(event, "dest_path") and event.dest_path:
+                    dest = Path(event.dest_path)
+                    dest_dir = dest if dest.is_dir() else dest.parent
+                    app.call_from_thread(app._queue_refresh, dest_dir)
+
+        self._observer = Observer()
+        self._observer.schedule(Handler(), str(self.root), recursive=True)
+        self._observer.start()
+
+        signal.signal(signal.SIGTERM, lambda s, f: (self._cleanup_marker(), sys.exit(0)))
+        self.set_interval(30, self._save_state)
+        self.set_timer(0.5, self._restore_state)
+        self._create_marker()
+
+    def on_unmount(self) -> None:
+        self._save_state()
+        self._cleanup_marker()
+        if self._observer:
+            self._observer.stop()
+            self._observer.join()
+
+    @staticmethod
+    def _marker_path() -> Path | None:
+        pane = os.environ.get("TMUX_PANE")
+        return Path(f"/tmp/tree-copy-{pane}") if pane else None
+
+    def _create_marker(self) -> None:
+        m = self._marker_path()
+        if m:
+            m.touch()
+
+    def _cleanup_marker(self) -> None:
+        m = self._marker_path()
+        if m:
+            try:
+                m.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _queue_refresh(self, path: Path) -> None:
+        """Debounce filesystem events and batch reloads (runs on main thread)."""
+        self._pending_paths.add(path)
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+        self._refresh_timer = self.set_timer(0.3, self._flush_refresh)
+
+    def _flush_refresh(self) -> None:
+        """Reload tree nodes for all queued changed paths."""
+        tree = self.query_one(FileTree)
+        for path in self._pending_paths:
+            node = self._find_node(tree, path)
+            if node is not None and node.is_expanded:
+                tree.reload_node(node)
+        self._pending_paths.clear()
+        self._refresh_timer = None
+
+    def _find_node(self, tree: "FileTree", path: Path):
+        """Walk loaded tree nodes to find the one matching path."""
+        def walk(node):
+            if tree._node_path(node) == path:
+                return node
+            for child in node.children:
+                found = walk(child)
+                if found:
+                    return found
+            return None
+        return walk(tree.root)
 
     _HIDDEN_COMMANDS = {"Screenshot", "Maximize", "Minimize"}
 
@@ -246,11 +446,33 @@ def main() -> None:
         default=".",
         help="Root directory to browse (default: current directory)",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Serve the app in a browser via textual-serve",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for --serve mode (default: 8000)",
+    )
     args = parser.parse_args()
     root = Path(args.directory).resolve()
     if not root.is_dir():
         parser.error(f"{root} is not a directory")
-    SidebarApp(root).run()
+
+    if args.serve:
+        try:
+            from textual_serve.server import Server
+        except ImportError:
+            parser.error("textual-serve is required: pip install textual-serve")
+        cmd = f"{sys.executable} {Path(__file__).resolve()} {root}"
+        server = Server(command=cmd, host="localhost", port=args.port)
+        print(f"Serving at http://localhost:{args.port}")
+        server.serve()
+    else:
+        SidebarApp(root).run()
 
 
 if __name__ == "__main__":
