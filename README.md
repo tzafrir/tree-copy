@@ -1,8 +1,15 @@
 # tree-copy
 
+[![PyPI version](https://img.shields.io/pypi/v/tree-copy)](https://pypi.org/project/tree-copy/)
+[![Python versions](https://img.shields.io/pypi/pyversions/tree-copy)](https://pypi.org/project/tree-copy/)
+[![License](https://img.shields.io/github/license/tzafrir/tree-copy)](LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/tree-copy)](https://pypi.org/project/tree-copy/)
+
 A keyboard-driven file tree sidebar for tmux, built with [Textual](https://github.com/Textualize/textual).
 
 Browse your project, jump between directories, copy paths, and preview files — without leaving the terminal.
+
+**[PyPI](https://pypi.org/project/tree-copy/) · [GitHub](https://github.com/tzafrir/tree-copy)**
 
 ## Features
 

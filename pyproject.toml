@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tree-copy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Keyboard-driven file tree sidebar for tmux"
 readme = "README.md"
 license = "MIT"
@@ -17,6 +17,12 @@ serve = ["textual-serve>=1.1"]
 
 [project.scripts]
 tree-copy = "tree_copy:main"
+
+[project.urls]
+Homepage = "https://github.com/tzafrir/tree-copy"
+Repository = "https://github.com/tzafrir/tree-copy"
+"Bug Tracker" = "https://github.com/tzafrir/tree-copy/issues"
+PyPI = "https://pypi.org/project/tree-copy/"
 
 [tool.setuptools]
 py-modules = ["tree_copy"]
