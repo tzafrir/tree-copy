@@ -9,13 +9,14 @@ Browse your project, jump between directories, copy paths, and preview files —
 - Navigate the file tree with arrow keys
 - Jump between sibling directories with `Shift+↑/↓`
 - Copy relative or absolute paths to clipboard
-- Preview files with [glow](https://github.com/charmbracelet/glow)
+- Preview files with [glow](https://github.com/charmbracelet/glow) (falls back to `less`)
+- Edit files with `$TREE_COPY_EDITOR` (falls back to nano → vi)
 - Root folder stays open (non-collapsible)
 
 ## Requirements
 
 - Python 3.10+
-- [glow](https://github.com/charmbracelet/glow) (for file preview)
+- [glow](https://github.com/charmbracelet/glow) *(optional, recommended for file preview — falls back to `less`)*
 
 ## Install
 
@@ -59,8 +60,8 @@ bind-key e run-shell " \
 | `↑` / `↓` | Navigate |
 | `Shift+↑` / `Shift+↓` | Jump between sibling directories; moves to parent at bounds |
 | `Enter` / `Space` | Toggle directory open/close |
-| `o` | Preview file with glow |
-| `e` | Edit file with nano |
+| `o` | Preview file (glow if available, else less) |
+| `e` | Edit file (`$TREE_COPY_EDITOR`, else nano, else vi) |
 | `c` | Copy relative path to clipboard |
 | `C` | Copy absolute path to clipboard |
 | `q` / `Esc` | Quit |

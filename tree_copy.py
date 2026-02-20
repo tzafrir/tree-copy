@@ -115,6 +115,26 @@ class FileTree(DirectoryTree):
         except Exception:
             return False
 
+    @staticmethod
+    def _find_viewer() -> list[str]:
+        """Return the best available file viewer command."""
+        import shutil
+        if shutil.which("glow"):
+            return ["glow", "-p"]
+        return ["less"]
+
+    @staticmethod
+    def _find_editor() -> list[str]:
+        """Return editor from TREE_COPY_EDITOR env, falling back to nano or vi."""
+        import shutil
+        custom = os.environ.get("TREE_COPY_EDITOR")
+        if custom:
+            return custom.split()
+        for ed in ("nano", "vi"):
+            if shutil.which(ed):
+                return [ed]
+        return ["vi"]
+
     def action_open_glow(self) -> None:
         path = self._node_path(self.cursor_node)
         if path and path.is_file():
@@ -122,7 +142,7 @@ class FileTree(DirectoryTree):
                 self.app.notify("Not available in browser mode", severity="warning")
                 return
             with self.app.suspend():
-                subprocess.run(["glow", "-p", str(path)])
+                subprocess.run([*self._find_viewer(), str(path)])
 
     def action_edit_nano(self) -> None:
         path = self._node_path(self.cursor_node)
@@ -131,7 +151,7 @@ class FileTree(DirectoryTree):
                 self.app.notify("Not available in browser mode", severity="warning")
                 return
             with self.app.suspend():
-                subprocess.run(["nano", str(path)])
+                subprocess.run([*self._find_editor(), str(path)])
 
     def action_copy_rel_path(self) -> None:
         path = self._node_path(self.cursor_node)
