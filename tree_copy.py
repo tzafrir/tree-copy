@@ -48,6 +48,49 @@ class FileTree(DirectoryTree):
     ]
 
     # ------------------------------------------------------------------
+    # Gitignore
+    # ------------------------------------------------------------------
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ignored: set[str] = set()
+
+    def on_mount(self) -> None:
+        # Check root's children after initial load
+        self.set_timer(0.4, lambda: self._update_ignored(self.root))
+
+    def on_tree_node_expanded(self, event) -> None:
+        self.set_timer(0.05, lambda: self._update_ignored(event.node))
+
+    def _update_ignored(self, node) -> None:
+        paths = [p for c in node.children if (p := self._node_path(c))]
+        if not paths:
+            return
+        newly = self._check_gitignore(paths)
+        if newly - self._ignored:
+            self._ignored.update(newly)
+            self.refresh()
+
+    @staticmethod
+    def _check_gitignore(paths: list[Path]) -> set[str]:
+        try:
+            result = subprocess.run(
+                ["git", "check-ignore", "--stdin"],
+                input="\n".join(str(p) for p in paths),
+                capture_output=True, text=True,
+            )
+            return set(result.stdout.splitlines())
+        except Exception:
+            return set()
+
+    def render_label(self, node, base_style, style):
+        label = super().render_label(node, base_style, style)
+        p = self._node_path(node)
+        if p and str(p) in self._ignored:
+            label.stylize("color(240)")
+        return label
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
