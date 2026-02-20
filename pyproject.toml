@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tree-copy"
+version = "0.1.0"
+description = "Keyboard-driven file tree sidebar for tmux"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.10"
+dependencies = ["textual==8.0.0"]
+
+[project.scripts]
+tree-copy = "tree_copy:main"
+
+[tool.setuptools]
+py-modules = ["tree_copy"]
