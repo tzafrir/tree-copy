@@ -1,5 +1,7 @@
 # tree-copy
 
+![screenshot](images/screenshot.png)
+
 [![PyPI version](https://img.shields.io/pypi/v/tree-copy)](https://pypi.org/project/tree-copy/)
 [![Python versions](https://img.shields.io/pypi/pyversions/tree-copy)](https://pypi.org/project/tree-copy/)
 [![License](https://img.shields.io/github/license/tzafrir/tree-copy)](LICENSE)
